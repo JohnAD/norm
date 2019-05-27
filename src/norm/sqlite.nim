@@ -50,7 +50,7 @@ proc getColumn*(fieldRepr: FieldRepr): string =
     if prag.name == "dbCol" and prag.kind == pkKval:
       return $prag.value
 
-proc getColumns*(obj: object, force = false): seq[string] =
+proc getColumns*(obj: object, force = false, checkNulls = false): seq[string] =
   ## Get DB column names for an object as a sequence of strings.
 
   for field, _ in obj.fieldPairs:
@@ -60,13 +60,32 @@ proc getColumns*(obj: object, force = false): seq[string] =
       else:
         result.add field
 
+  if checkNulls:
+    var nullChecks: seq[string]
+
+    for column in result:
+      nullChecks.add "$# IS NULL" % column
+
+    result &= nullChecks
+
 proc getDbType(fieldRepr: FieldRepr): string =
   ## SQLite-specific mapping from Nim types to SQL data types.
 
-  result = case $fieldRepr.typ
-  of "int": "INTEGER"
-  of "string": "TEXT"
-  of "float": "REAL"
+  result = case kind(fieldRepr.typ)
+  of nnkIdent:
+    case $fieldRepr.typ
+    of "int": "INTEGER"
+    of "string": "TEXT"
+    of "float": "REAL"
+    else: "TEXT"
+  of nnkBracketExpr:
+    if $fieldRepr.typ[0] == "Option":
+      case $fieldRepr.typ[1]
+      of "int": "INTEGER"
+      of "string": "TEXT"
+      of "float": "REAL"
+      else: "TEXT"
+    else: "TEXT"
   else: "TEXT"
 
   for prag in fieldRepr.signature.pragmas:
@@ -140,17 +159,20 @@ proc genInsertQuery*(obj: object, force: bool): SqlQuery =
   result = sql "INSERT INTO $# ($#) VALUES ($#)" % [type(obj).getTable(), fields.join(", "),
                                                     placeholders.join(", ")]
 
-proc genGetOneQuery*(obj: object, condition: string): SqlQuery =
+proc genGetOneQuery*(obj: object, condition: string, checkNulls = false): SqlQuery =
   ## Generate ``SELECT`` query to fetch a single record for an object.
 
-  sql "SELECT $# FROM $# WHERE $#" % [obj.getColumns(force=true).join(", "),
-                                      type(obj).getTable(), condition]
+  let columns = obj.getColumns(force=true, checkNulls=checkNulls)
 
-proc genGetManyQuery*(obj: object, condition: string): SqlQuery =
+  sql "SELECT $# FROM $# WHERE $#" % [columns.join(", "), type(obj).getTable(), condition]
+
+proc genGetManyQuery*(obj: object, condition: string, checkNulls = false): SqlQuery =
   ## Generate ``SELECT`` query to fetch multiple records for an object.
 
-  sql "SELECT $# FROM $# WHERE $# LIMIT ? OFFSET ?" % [obj.getColumns(force=true).join(", "),
-                                                       type(obj).getTable(), condition]
+  let columns = obj.getColumns(force=true, checkNulls=checkNulls)
+
+  sql "SELECT $# FROM $# WHERE $# LIMIT ? OFFSET ?" % [columns.join(", "), type(obj).getTable(),
+                                                       condition]
 
 proc genUpdateQuery*(obj: object, force: bool): SqlQuery =
   ## Generate ``UPDATE`` query for an object.
@@ -226,7 +248,7 @@ template genWithDb(connection, user, password, database: string,
         If multiple records are found, return the first one.
         ]##
 
-        let getOneQuery = genGetOneQuery(obj, cond)
+        let getOneQuery = genGetOneQuery(obj, cond, true)
 
         debug getOneQuery, " <- ", params.join(", ")
 
@@ -249,7 +271,7 @@ template genWithDb(connection, user, password, database: string,
       template getOne(obj: var object, id: int) {.used.} =
         ## Read a record from DB by id and store it into an existing object instance.
 
-        let getOneQuery = genGetOneQuery(obj, "id=?")
+        let getOneQuery = genGetOneQuery(obj, "id=?", true)
 
         debug getOneQuery, " <- ", $id
 
@@ -275,7 +297,7 @@ template genWithDb(connection, user, password, database: string,
         if len(objs) == 0: return
 
         let
-          getManyQuery = genGetManyQuery(objs[0], cond)
+          getManyQuery = genGetManyQuery(objs[0], cond, true)
           params = @params & @[$min(limit, len(objs)), $offset]
 
         debug getManyQuery, " <- ", params.join(", ")
