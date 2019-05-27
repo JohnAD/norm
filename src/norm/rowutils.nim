@@ -2,6 +2,8 @@ import strutils, sequtils
 import sugar
 import macros; export macros
 
+import options
+
 import objutils, pragmas
 
 
@@ -88,6 +90,12 @@ template to*(row: Row, obj: var object) =
       obj.dot(field) = parseInt row[i]
     elif type(value) is float:
       obj.dot(field) = parseFloat row[i]
+    elif type(value) is Option[string]:
+      obj.dot(field) = some row[i]
+    elif type(value) is Option[int]:
+      obj.dot(field) = some parseInt row[i]
+    elif type(value) is Option[float]:
+      obj.dot(field) = some parseFloat row[i]
     else:
       raise newException(ValueError, "Parser for $# is undefined." % type(value))
 
@@ -230,6 +238,8 @@ proc toRow*(obj: object, force = false): Row =
         block:
           let it {.inject.} = value
           result.add obj.dot(field).getCustomPragmaVal(formatIt)
+      elif type(value) is Option:
+        result.add $get(value)
       else:
         result.add $value
 
