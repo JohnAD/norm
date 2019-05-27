@@ -1,6 +1,6 @@
 import unittest
 
-import os, strutils, sequtils, times
+import os, strutils, sequtils, times, options
 
 import norm / sqlite
 
@@ -19,7 +19,7 @@ db("test.db", "", "", ""):
     Book {.table: "books".} = object
       title: string
       authorEmail {.fk: User.email, onDelete: "CASCADE".}: string
-      publisherTitle {.fk: Publisher.title.}: string
+      publisherTitle {.fk: Publisher.title.}: Option[string]
 
   proc getBookById(id: string): Book = withDb(Book.getOne parseInt(id))
 
@@ -46,7 +46,7 @@ suite "Creating and dropping tables, CRUD":
                       birthDate: parse("200$1-0$1-0$1" % $i, "yyyy-MM-dd"))
           publisher = Publisher(title: "Publisher $#" % $i)
           book = Book(title: "Book $#" % $i, authorEmail: user.email,
-                      publisherTitle: publisher.title)
+                      publisherTitle: some publisher.title)
           edition = Edition(title: "Edition $#" % $i)
 
         user.insert()
